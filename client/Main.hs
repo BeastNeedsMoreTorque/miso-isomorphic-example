@@ -1,39 +1,43 @@
+{-# LANGUAGE CPP               #-}
+{-# LANGUAGE TypeApplications  #-}
+{-# LANGUAGE TypeOperators     #-}
+
 module Main where
 
 import qualified Common
-import Data.Proxy
-import Control.Lens hiding ( view )
-
-import Miso
-import Miso.String
-
--- Miso has to know what the URI of the application is for use in apps with
--- multiple pages.
-instance HasURI Common.Model where
-  lensURI = Common.uri
+import Data.Proxy ( Proxy(..) )
+import Control.Lens ( (^.), (+=), (-=), (.=), makeLenses )
+import qualified Servant.API as Servant
+import Servant.API ( (:<|>)(..) )
+#if MIN_VERSION_servant(0,10,0)
+import qualified Servant.Utils.Links as Servant
+#endif
+import qualified Miso
+import Miso ( View, App(..) )
+import qualified Miso.String as Miso
 
 main :: IO ()
 main =
-  miso App
+  Miso.miso $ \currentURI -> App
     { initialAction = Common.NoOp
-    , model         = Common.initialModel
-    , update        = updateModel
-    , view          = Common.homeView
-    , events        = defaultEvents
-    , subs          = []
+    , model         = Common.initialModel currentURI
+    , update        = Miso.fromTransition . updateModel
+    , view          = Common.viewModel
+    , events        = Miso.defaultEvents
+    , subs          = [ Miso.uriSub Common.HandleURIChange ]
+    , mountPoint    = Nothing
     }
-
 
 updateModel
     :: Common.Action
-    -> Common.Model
-    -> Effect Common.Action Common.Model
-updateModel action m =
+    -> Miso.Transition Common.Action Common.Model ()
+updateModel action =
     case action of
-      Common.NoOp -> noEff m
-      Common.AddOne ->
-        m & Common.counterValue +~ 1
-          & noEff
-      Common.SubtractOne ->
-        m & Common.counterValue -~ 1
-          & noEff
+      Common.NoOp          -> pure ()
+      Common.AddOne        -> Common.counterValue += 1
+      Common.SubtractOne   -> Common.counterValue -= 1
+      Common.ChangeURI uri ->
+        Miso.scheduleIO $ do
+          Miso.pushURI uri
+          pure Common.NoOp
+      Common.HandleURIChange uri -> Common.uri .= uri
